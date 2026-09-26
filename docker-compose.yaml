@@ -1,0 +1,11 @@
+services:
+  google-flights-scraper:
+    build: .
+    restart: unless-stopped
+    shm_size: 1gb
+    ports:
+      - "8000:8000"
+    environment:
+      - PORT=8000
+      # Optional — Google Flights did not rate-limit our tests, so leave this unset.
+      # - GOOGLE_FLIGHTS_PROXY=http://user:pass@host:port
