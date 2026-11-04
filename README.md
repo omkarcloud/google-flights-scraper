@@ -133,9 +133,9 @@ print(response.json())
 
 You're a developer — we know how hard completing a project can be. So we offer full support: just message us and we'll reply ✅ with a solution within 1 working day.
 
-[![Message Us on WhatsApp about Google Flights Scraper](https://raw.githubusercontent.com/omkarcloud/assets/master/images/whatsapp-us.png)](https://api.whatsapp.com/send?phone=918178804274&text=I%20need%20help%20using%20the%20Google%20Flights%20Scraper%20API.)
+[![Message Us on WhatsApp about Google Flights Scraper](https://raw.githubusercontent.com/omkarcloud/assets/master/images/whatsapp-us.png)](https://www.omkar.cloud/l/google-flights-scraper-github-whatsapp)
 
-[![Ask Us by Email about Google Flights Scraper](https://raw.githubusercontent.com/omkarcloud/assets/master/images/ask-on-email.png)](mailto:happy.to.help@omkar.cloud?subject=Help%20with%20Google%20Flights%20Scraper%20API&body=I%20need%20help%20using%20the%20Google%20Flights%20Scraper%20API.)
+[![Ask Us by Email about Google Flights Scraper](https://raw.githubusercontent.com/omkarcloud/assets/master/images/ask-on-email.png)](https://www.omkar.cloud/l/google-flights-scraper-github-email)
 
 ## ⚡ Popular Scrapers by Omkar Cloud
 
