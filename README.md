@@ -145,6 +145,7 @@ You're a developer — we know how hard completing a project can be. So we offer
 - [**AliExpress Scraper**](https://www.omkar.cloud/tools/aliexpress-scraper-api) — live product details, SKU variants, stock & shipping
 - [**Booking Scraper**](https://www.omkar.cloud/tools/booking-scraper) — Booking.com hotels: prices, ratings, rooms & amenities
 - [**Kiwi Com Scraper**](https://github.com/omkarcloud/kiwi-com-scraper) — Kiwi.com flights: live fares, bag fees, self-transfer deals & price calendars
+- [**Waze Scraper**](https://github.com/omkarcloud/waze-scraper) — live Waze traffic jams, road closures, driving routes with tolls & places
 
 ## ⭐ Love It? [Star It ⭐!](https://github.com/omkarcloud/google-flights-scraper)
 
