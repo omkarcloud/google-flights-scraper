@@ -32,6 +32,7 @@ modified bodies (see google_flights/minter.py):
 """
 import base64
 import json
+import fastjson
 import re
 import zlib
 
@@ -150,7 +151,7 @@ def explore_body(req, bounds=None, round_trip=False, tail=None):
 def with_selection(req, selections):
     """A copy of `req` whose legs carry the chosen itineraries
     (selections[i] = that leg's [[from, date, to, None, airline, number], ...])."""
-    req = json.loads(json.dumps(req))
+    req = fastjson.loads(json.dumps(req))
     for i, sel in enumerate(selections):
         if sel and i < len(req[13]):
             req[13][i][8] = sel
@@ -179,7 +180,7 @@ def unpack_token(value, kind):
     body = value[len(TOKEN_PREFIX):]
     try:
         raw = zlib.decompress(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
-        data = json.loads(raw)
+        data = fastjson.loads(raw)
     except Exception:
         raise ValueError(f"malformed {kind}_token (copy it whole from the previous response)")
     if not isinstance(data, dict) or data.get("k") != kind:

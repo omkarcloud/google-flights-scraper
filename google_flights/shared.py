@@ -4,6 +4,7 @@ Google Flights payloads are positional JSON arrays (protobuf-as-JSON), so
 every accessor here is defensive: a missing index, a None where a list was
 expected or a changed type yields None instead of raising."""
 from datetime import datetime, timezone
+from scraper_utils.values import as_list, to_int as as_int
 
 CABIN_CODES = {"economy": 1, "premium_economy": 2, "business": 3, "first": 4}
 CABIN_NAMES = {1: "economy", 2: "premium_economy", 3: "business", 4: "first",
@@ -22,26 +23,11 @@ def at(value, *path):
     return value
 
 
-def as_list(value):
-    return value if isinstance(value, list) else []
-
-
 def as_str(value):
     if value is None or isinstance(value, (bool, list, dict)):
         return None
     text = str(value).strip()
     return text or None
-
-
-def as_int(value):
-    if value is None or isinstance(value, bool):
-        return None
-    if isinstance(value, (int, float)):
-        return int(value)
-    try:
-        return int(str(value).strip())
-    except ValueError:
-        return None
 
 
 def as_bool(value):

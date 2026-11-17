@@ -21,7 +21,7 @@ at call time (autocomplete).
   region (Explore)
       europe | asia | ... | north,east,south,west bounds ("71,40,35,-25")
 """
-import json
+import fastjson
 import re
 import unicodedata
 from datetime import date, datetime
@@ -102,7 +102,7 @@ def legs_ref(value):
     raw = []
     if value.startswith("["):
         try:
-            items = json.loads(value)
+            items = fastjson.loads(value)
         except ValueError:
             raise ValueError("legs JSON is malformed")
         for item in items if isinstance(items, list) else []:

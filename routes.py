@@ -82,9 +82,6 @@ for _path, _schema, _fn in ENDPOINTS:
 @route("/", method="GET")
 @route("/health", method="GET")
 def health():
-    return json_response({"status": "ok", "token_browser": minter.MINTER.status(),
+    return json_response({"status": "ok",
                           "endpoints": [p for p, _, _ in ENDPOINTS]})
 
-
-if config.GOOGLE_FLIGHTS_MINTER_WARM:
-    minter.warm_async()

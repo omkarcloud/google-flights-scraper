@@ -25,6 +25,7 @@ Error taxonomy (scraper_errors, mapped to HTTP by route_glue):
   GoogleFlightsUpstreamError transport failure / unparseable / empty — retryable
 """
 import json
+import fastjson
 import os
 import re
 import sys
@@ -35,7 +36,9 @@ from urllib.parse import urlencode
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import config
+import egress
 from scraper_errors import BadRequest, Blocked, NotFound, UpstreamError
+from scraper_utils import sessions
 
 SITE = "https://www.google.com"
 RPC_PATH = "/_/FlightsFrontendUi/data/travel.frontend.flights.FlightsFrontendService/"
@@ -49,7 +52,7 @@ REJECT_BACKOFF = 1.5      # seconds x attempt after a parameter rejection
 
 RPC_HEADERS = {
     "accept": "*/*",
-    "accept-language": "en-US,en;q=0.9",
+    "accept-language": egress.site_accept_language("google-flights"),
     "content-type": "application/x-www-form-urlencoded;charset=UTF-8",
     "origin": SITE,
     "referer": SITE + "/travel/flights",
@@ -57,7 +60,7 @@ RPC_HEADERS = {
 }
 PAGE_HEADERS = {
     "accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
-    "accept-language": "en-US,en;q=0.9",
+    "accept-language": egress.site_accept_language("google-flights"),
     "upgrade-insecure-requests": "1",
 }
 
@@ -90,11 +93,7 @@ _local = threading.local()
 
 
 def _new_session(proxy):
-    from curl_cffi import requests as curl_requests
-    sess = curl_requests.Session(impersonate=IMPERSONATE)
-    if proxy:
-        sess.proxies = {"http": proxy, "https": proxy}
-    return sess
+    return sessions.curl_session(IMPERSONATE, proxy)
 
 
 def _session(fresh_exit=False):
@@ -164,7 +163,7 @@ def decode_chunks(text):
         if not line.startswith("[["):
             continue
         try:
-            envelopes = json.loads(line)
+            envelopes = fastjson.loads(line)
         except ValueError:
             continue
         for env in envelopes:
@@ -174,7 +173,7 @@ def decode_chunks(text):
                 raw = env[2] if len(env) > 2 else None
                 if isinstance(raw, str):
                     try:
-                        payloads.append(json.loads(raw))
+                        payloads.append(fastjson.loads(raw))
                     except ValueError:
                         pass
                 elif len(env) > 5 and isinstance(env[5], list) and env[5]:
@@ -230,8 +229,14 @@ def rpc(method, inner, locale=None):
     headers = dict(RPC_HEADERS, **{"x-goog-ext-259736195-jspb": _ext_header(locale)})
     last = None
     blocked = False
+    # One token per call, not per attempt: the token binds to `f.req` and
+    # stays valid for 20+ minutes (minter.py), so a transport error, a block
+    # or a rejected body retries with the SAME token; only TokenRejected
+    # mints again (until 2026-11-09 every attempt minted, up to 4 per call).
+    token = None
     for attempt in range(1, RPC_ATTEMPTS + 1):
-        token = MINTER.token(freq)
+        if token is None:
+            token = MINTER.token(freq)
         try:
             resp = _session(fresh_exit=blocked).post(url, data={"f.req": freq},
                                                      headers=dict(headers, **{"x-goog-batchexecute-bgr": token}),
@@ -252,6 +257,7 @@ def rpc(method, inner, locale=None):
             last, blocked = e, True
         except TokenRejected as e:
             last = e
+            token = None
             MINTER.recycle()
         except GoogleFlightsUpstreamError as e:
             last = e
@@ -313,7 +319,7 @@ def af_blobs(html):
     out = {}
     for key, raw in _AF_RE.findall(html or ""):
         try:
-            out[key] = json.loads(raw)
+            out[key] = fastjson.loads(raw)
         except ValueError:
             continue
     return out

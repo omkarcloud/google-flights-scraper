@@ -10,9 +10,12 @@ interceptor does `bgr = await runner.run(freq)`). Measured 2026-09-26:
     exit (direct or residential), reusable, still valid 20+ minutes later;
   * minting is ~10 ms once the page is up (no network round trip).
 
-So ONE long-lived patchright Chrome parked on google.com/travel/flights is
-enough for the whole service: curl_cffi does all fetching and asks this
-module for a token per body.
+Since 2026-10-21 no browser runs on GKE: ONE parked headed Chrome on the
+browser box (recipes/google_flights.py, a TokenMint recipe) stays on
+google.com/travel/flights and mints a token per f.req; GKE's curl_cffi does
+all fetching and asks this module for a token per body, which is one
+browser_client.token("google-flights", freq) call. The box owns the
+browser's lifecycle (idle close, max_uses, max_age in the recipe).
 
 Finding the runner without relying on minified names (they change every
 release): the module namespace is window.default_FlightsFrontendUi_* ; the
@@ -20,26 +23,23 @@ BotGuard service is the class whose prototype has a method whose source
 mentions "mnsUbf" (the WIZ key of the BotGuard program) and "initialize"
 (2026-09-22 build: _.w2a.prototype.r3). The live instance is found through
 CDP Runtime.queryObjects on that prototype, and the page gets
-`window.__gfMint = f => instance[method]().run(f)` (main world).
-
-The browser is recycled after GOOGLE_FLIGHTS_MINTER_MAX_AGE seconds and
-whenever a mint fails or Google rejects a minted token (fetch.py calls
-recycle()).
+`window.__gfMint = f => instance[method]().run(f)` (main world). That page
+work (_prepare, _MINT_JS) lives here and is imported by the recipe, so this
+module must keep importing on the box, where browser_client is irrelevant
+(hence the lazy import in TokenMinter.token).
 """
 import json
 import os
 import sys
-import threading
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-import config
 from scraper_errors import UpstreamError
 
+SITE = "google-flights"              # recipes/google_flights.py
 HOME = "https://www.google.com/travel/flights?hl=en&gl=us&curr=USD"
 PREPARE_TIMEOUT_S = 25
-MINT_TIMEOUT_S = 20
 
 _FIND_JS = r"""() => {
   const nsKey = Object.keys(window).find(k => k.startsWith('default_FlightsFrontendUi'));
@@ -69,11 +69,13 @@ _MINT_JS = "async (freq) => window.__gfMint ? await window.__gfMint(freq) : null
 
 
 class MinterUnavailable(UpstreamError):
-    """The token browser could not start or mint (the caller may fall back)."""
+    """No BotGuard token could be minted (box down, busy, refused or over
+    its re-mint budget); the caller may fall back to the token-free page."""
 
 
 def _prepare(page):
-    """Owner-thread op: load Flights, find the BotGuard service, bind __gfMint."""
+    """Owner-thread op (runs on the box): load Flights, find the BotGuard
+    service, bind __gfMint."""
     page.goto(HOME, wait_until="domcontentloaded", timeout=60000)
     deadline = time.monotonic() + PREPARE_TIMEOUT_S
     found = None
@@ -112,93 +114,51 @@ def _prepare(page):
     return found
 
 
+TOKEN_TIMEOUT = 180   # seconds GKE waits for one token (cold: 20 s queue + 120 s warm)
+
+
 class TokenMinter:
+    """GKE side: a token per f.req from the browser box. Holds no browser."""
+
     def __init__(self):
-        self._lock = threading.Lock()
-        self._driver = None
-        self._born = 0.0
         self.mints = 0
-        self.info = None
-
-    def _start(self):
-        from chrome_manager import create_scope
-        from patchright_driver import PatchrightDriver
-        with create_scope():
-            driver = PatchrightDriver(proxy_url=config.google_flights_minter_proxy(),
-                                      headless=config.GOOGLE_FLIGHTS_MINTER_HEADLESS)
-        try:
-            self.info = driver.call(_prepare, timeout=PREPARE_TIMEOUT_S + 70)
-        except Exception:
-            try:
-                driver.close()
-            except Exception:
-                pass
-            raise
-        self._driver = driver
-        self._born = time.monotonic()
-        print(f"google-flights: token minter ready ({self.info})")
-
-    def _ensure(self):
-        """The live driver (started or recycled as needed). Caller holds _lock."""
-        expired = self._driver is not None and time.monotonic() - self._born > config.GOOGLE_FLIGHTS_MINTER_MAX_AGE
-        if expired:
-            self._close()
-        if self._driver is None:
-            try:
-                self._start()
-            except MinterUnavailable:
-                raise
-            except Exception as e:
-                raise MinterUnavailable(f"token browser failed to start: {type(e).__name__}: {e}")
-        return self._driver
-
-    def _close(self):
-        driver, self._driver = self._driver, None
-        if driver is not None:
-            try:
-                driver.close()
-            except Exception:
-                pass
-
-    def recycle(self):
-        with self._lock:
-            self._close()
+        self.recycles = 0
+        self.last_error = None
 
     def token(self, freq):
-        """BotGuard token for this exact f.req string (two tries, the second
-        on a fresh browser)."""
-        last = None
-        for attempt in range(2):
-            with self._lock:
-                driver = self._ensure()
-            try:
-                tok = driver.call(lambda page: page.evaluate(_MINT_JS, freq, isolated_context=False),
-                                  timeout=MINT_TIMEOUT_S)
-            except Exception as e:
-                last = e
-                tok = None
-            if isinstance(tok, str) and len(tok) > 100:
-                self.mints += 1
-                return tok
-            print(f"google-flights: mint attempt {attempt + 1} failed ({last or tok!r}); recycling the browser")
-            self.recycle()
-        raise MinterUnavailable(f"could not mint a BotGuard token: {last}")
+        """BotGuard token for this exact f.req string, minted on the box.
+        BoxUnavailable / BoxRefused / RemintBudgetExceeded -> MinterUnavailable
+        (flights.py falls back to the server-rendered search page)."""
+        import browser_client
+        import config
+        # No proxy (the token is not IP-bound), so every candidate would key
+        # the one "direct" browser: name INPAGE_BROWSER_SLOTS x
+        # BROWSER_BURST_FACTOR sessions instead and let the box pick an idle
+        # parked page or open another while it has headroom (2026-11-04).
+        candidates = [(None, f"flights#{i}") for i in range(config.burst_slots(config.INPAGE_BROWSER_SLOTS))]
+        try:
+            # a cold mint = up to 20 s queue + a 120 s warm on the box, past
+            # the client's 60 s default (section F, 2026-11-04)
+            _i, tok = browser_client.token_any(SITE, candidates, freq, timeout=TOKEN_TIMEOUT)
+        except (browser_client.BoxUnavailable, browser_client.BoxRefused,
+                browser_client.RemintBudgetExceeded) as e:
+            self.last_error = f"{type(e).__name__}: {e}"
+            raise MinterUnavailable(f"could not mint a BotGuard token: {e}") from e
+        if not isinstance(tok, str) or len(tok) <= 100:
+            self.last_error = f"short token {tok!r}"[:200]
+            raise MinterUnavailable("browser box answered without a usable BotGuard token")
+        self.mints += 1
+        return tok
+
+    def recycle(self):
+        """Called by fetch.py when Google rejects a minted token. The box
+        owns the parked browser (idle close, max_uses, max_age in the
+        recipe), so there is nothing to tear down here; counted only."""
+        self.recycles += 1
 
     def status(self):
-        return {"running": self._driver is not None, "mints": self.mints,
-                "age_seconds": int(time.monotonic() - self._born) if self._driver else None}
+        return {"running": False, "backend": "browser-box", "mints": self.mints,
+                "recycles": self.recycles, "last_error": self.last_error}
 
 
 MINTER = TokenMinter()
-
-
-def warm_async():
-    """Start the browser in the background at boot (first RPC then skips the
-    ~5-10 s launch)."""
-    def _warm():
-        try:
-            with MINTER._lock:
-                MINTER._ensure()
-        except Exception as e:
-            print(f"google-flights: minter warm-up failed: {type(e).__name__}: {e}")
-    threading.Thread(target=_warm, name="google-flights-minter-warm", daemon=True).start()

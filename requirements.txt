@@ -5,3 +5,5 @@ marshmallow
 patchright
 psutil
 pyvirtualdisplay
+browserforge
+requests

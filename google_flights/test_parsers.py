@@ -21,6 +21,7 @@ import pytest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from google_flights import explore, fetch, flights, places, prices, protocol, refs, route_pages  # noqa: E402
+from scraper_utils.testing import hosted_only
 
 FIXTURES = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fixtures")
 RECORD = os.environ.get("GOOGLE_FLIGHTS_RECORD") == "1"
@@ -259,3 +260,20 @@ def test_tokens_and_tfs():
     tfs = protocol.tfs(2, [{"origins": [{"id": "JFK", "kind": 0}], "destinations": [{"id": "LAX", "kind": 0}],
                             "date": "2026-10-20", "max_stops": None, "selected": None}])
     assert tfs == "CBwQAhoeEgoyMDI2LTEwLTIwagcIARIDSkZLcgcIARIDTEFYQAFIAXABmAEC"  # the search page accepted this exact query (2026-09-26)
+
+
+@hosted_only
+def test_token_minter_waits_for_a_cold_mint(monkeypatch):
+    import browser_client
+    from google_flights import minter
+    calls = []
+    import config
+    monkeypatch.setattr(config, "INPAGE_BROWSER_SLOTS", 2)
+    monkeypatch.setattr(config, "BROWSER_BURST_FACTOR", 4)
+    monkeypatch.setattr(browser_client, "token_any",
+                        lambda site, candidates, freq, variant="", timeout=None: calls.append((site, candidates, freq, timeout)) or (3, "t" * 200))
+    m = minter.TokenMinter()
+    assert m.token("[[freq]]").startswith("t") and m.mints == 1
+    site, candidates, freq, timeout = calls[0]
+    assert (site, freq, timeout) == ("google-flights", "[[freq]]", minter.TOKEN_TIMEOUT) and minter.TOKEN_TIMEOUT == 180
+    assert candidates == [(None, f"flights#{i}") for i in range(8)]       # share 2 x factor 4 sessions, no proxy
