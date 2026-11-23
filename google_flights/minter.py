@@ -20,13 +20,20 @@ browser's lifecycle (idle close, max_uses, max_age in the recipe).
 Finding the runner without relying on minified names (they change every
 release): the module namespace is window.default_FlightsFrontendUi_* ; the
 BotGuard service is the class whose prototype has a method whose source
-mentions "mnsUbf" (the WIZ key of the BotGuard program) and "initialize"
-(2026-09-22 build: _.w2a.prototype.r3). The live instance is found through
-CDP Runtime.queryObjects on that prototype, and the page gets
-`window.__gfMint = f => instance[method]().run(f)` (main world). That page
-work (_prepare, _MINT_JS) lives here and is imported by the recipe, so this
-module must keep importing on the box, where browser_client is irrelevant
-(hence the lazy import in TokenMinter.token).
+mentions "mnsUbf" (the WIZ key of the BotGuard program) and "initialize".
+The live instance is found through CDP Runtime.queryObjects on that
+prototype, and the page gets `window.__gfMint = f => instance[method]().run(f)`
+(main world). That page work (_prepare, _MINT_JS) lives here and is imported
+by the recipe, so this module must keep importing on the box, where
+browser_client is irrelevant (hence the lazy import in TokenMinter.token).
+
+EU IP fix (2026-11-23): a datacenter browser on an EU address never reaches
+the app — google.com bounces it to consent.google.com, the FlightsFrontendUi
+namespace never exists and _prepare fails with "BotGuard service class not
+found", which reads like a bundle change but is not. The SOCS consent cookie
+(general consent, set on .google.com before the first navigation) skips the
+wall; if Google ever rots the cookie's format, _accept_consent clicks
+through the form as a fallback so the box keeps minting.
 """
 import json
 import os
@@ -67,6 +74,26 @@ _BIND_FN = """function(method) {
 
 _MINT_JS = "async (freq) => window.__gfMint ? await window.__gfMint(freq) : null"
 
+# "General consent" SOCS value: says yes to cookie use, no to ad
+# personalization, for .google.com. Enough for the app to load and mint.
+CONSENT_SOCS = "CAESHAgBEhJnd3NfMjAyMzA4MTAtMF9SQzIaAmRlIAEaBgiA_LyaBg"
+
+
+def _accept_consent(page):
+    """If a cold page still lands on consent.google.com (SOCS format rotted),
+    accept the form in place; returns True when a consent page was handled."""
+    if "consent.google.com" not in (page.url or ""):
+        return False
+    for text in ("Accept all", "Reject all"):
+        try:
+            page.locator(f'button:has-text("{text}")').first.click(timeout=8000)
+            page.wait_for_load_state("domcontentloaded")
+            page.wait_for_timeout(4000)
+            return True
+        except Exception:
+            continue
+    return False
+
 
 class MinterUnavailable(UpstreamError):
     """No BotGuard token could be minted (box down, busy, refused or over
@@ -76,7 +103,18 @@ class MinterUnavailable(UpstreamError):
 def _prepare(page):
     """Owner-thread op (runs on the box): load Flights, find the BotGuard
     service, bind __gfMint."""
+    try:
+        page.context.add_cookies([{
+            "name": "SOCS", "value": CONSENT_SOCS, "domain": ".google.com",
+            "path": "/", "secure": True, "sameSite": "Lax"}])
+    except Exception:
+        pass  # a context without cookies (tests) must not break the mint
     page.goto(HOME, wait_until="domcontentloaded", timeout=60000)
+    try:
+        if _accept_consent(page):
+            page.goto(HOME, wait_until="domcontentloaded", timeout=60000)
+    except Exception:
+        pass
     deadline = time.monotonic() + PREPARE_TIMEOUT_S
     found = None
     while time.monotonic() < deadline:
