@@ -13,11 +13,12 @@ sibling url / id pair):
   returning_token / next_leg_token / booking_token
                          opaque tokens returned by the previous call
 """
-from datetime import date
+from datetime import date, timedelta
 
 from marshmallow import ValidationError, fields, missing, validate, validates_schema
 
 from google_flights import refs
+from google_flights.shared import MAX_DAYS_AHEAD
 from schema_fields import (BaseSchema, ChoiceField, CountryCodeField, CurrencyField, DateField, Flag,
                            LanguageCodeField, PositiveInt, QueryField, RefField)
 
@@ -87,12 +88,30 @@ class InterestField(_OptionalRef):
     resolver = staticmethod(refs.interests_ref)
 
 
+class TravelDateField(DateField):
+    """YYYY-MM-DD from today up to today + MAX_DAYS_AHEAD (shared.py): Google
+    Flights answers [3] past that day, which before 2026-11-28 reached the
+    caller as a 400 that named no param."""
+
+    def __init__(self, **kwargs):
+        kwargs.setdefault("bound", "future")
+        super().__init__(**kwargs)
+
+    def _deserialize(self, value, attr, data, **kwargs):
+        value = super()._deserialize(value, attr, data, **kwargs)
+        last = date.today() + timedelta(days=MAX_DAYS_AHEAD)
+        if date.fromisoformat(value) > last:
+            raise ValidationError(f"Must be on or before {last.isoformat()}: Google Flights searches at most "
+                                  f"{MAX_DAYS_AHEAD} days ahead.")
+        return value
+
+
 def _travel_date(required=False):
-    """YYYY-MM-DD, today or later (DateField defaults load_default=None, which
-    marshmallow forbids on required fields)."""
+    """YYYY-MM-DD, today up to MAX_DAYS_AHEAD days ahead (DateField defaults
+    load_default=None, which marshmallow forbids on required fields)."""
     if required:
-        return DateField(bound="future", required=True, load_default=missing)
-    return DateField(bound="future")
+        return TravelDateField(required=True, load_default=missing)
+    return TravelDateField()
 
 
 def _count(default=0, maximum=8):
@@ -213,7 +232,7 @@ class PriceInsightsSchema(FiltersSchema):
 class CalendarSchema(FiltersSchema):
     origin = PlaceField()
     destination = PlaceField()
-    start_date = DateField(bound="future", default_days_ahead=1)
+    start_date = TravelDateField(default_days_ahead=1)
     end_date = _travel_date()
     trip_length_days = PositiveInt(max_value=30)
 

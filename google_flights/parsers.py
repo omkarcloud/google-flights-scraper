@@ -291,6 +291,43 @@ def airline_policies(response):
     return list(out.values())
 
 
+def _has_itineraries(response):
+    return bool(as_list(at(response, 2, 0)) or as_list(at(response, 3, 0)))
+
+
+def shopping_complete(response):
+    """True for a GetShoppingResults chunk that carries the flights AND the
+    price insights (response[5]); fetch.rpc answers there without waiting
+    for the rest of the stream.
+
+    A search Google has not cached streams for 7 to 14 s, and the flights are
+    in an early chunk (measured 2026-11-28, cold one-ways read as a stream
+    from this Mac: LAX-SEA first complete chunk at 1.5 s, stream end 13.2 s;
+    LHR-DUB 1.4 / 7.7 s; SYD-BNE 2.7 / 13.6 s; LAX-JFK 0.9 / 12.7 s; SYD-MEL
+    1.9 / 9.9 s; JFK-LAX 0.8 / 8.1 s; JFK-MIA 0.5 / 0.5 s). Every later
+    complete chunk carried the same flights at the same prices (7 of 7). A
+    route whose answer never brings price insights is waited for to the end
+    (DXB-BOM 2027-02-24: 25 chunks, none with insights)."""
+    return _has_itineraries(response) and isinstance(at(response, 5), list)
+
+
+def shopping_chunk(chunks):
+    """The GetShoppingResults chunk to parse: the first complete one
+    (shopping_complete), else the first with flights, else the first.
+
+    Until 2026-11-28 flights._shop parsed chunks[0], which for a search
+    Google is still computing is a 4 KB progress chunk without flights
+    (ORD-DEN 2027-02-18: chunk 0 none, chunks 1-3 3 best + 15 other, price
+    insights from chunk 2), so the endpoint answered 200 with no flights:
+    27 of 50 one-ways over 10 popular routes (2026-11-28)."""
+    chunks = [c for c in chunks or [] if isinstance(c, list)]
+    for pick in (shopping_complete, _has_itineraries):
+        for chunk in chunks:
+            if pick(chunk):
+                return chunk
+    return chunks[0] if chunks else None
+
+
 def parse_shopping(response, currency=None):
     """GetShoppingResults payload (or the search page's ds:1) ->
     (best, other, extras). Best/other are parsed itineraries."""

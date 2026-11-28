@@ -76,8 +76,11 @@ def _unpack_locale(value):
 # ---- shopping ----------------------------------------------------------------------------------
 
 def _shop(req, sort, locale):
-    chunks = fetch.rpc("GetShoppingResults", protocol.shopping_body(req, protocol.SORTS[sort or "best"]), locale)
-    return chunks[0]
+    """The search's results chunk (parsers.shopping_chunk); rpc() answers
+    at its first complete chunk (parsers.shopping_complete)."""
+    chunks = fetch.rpc("GetShoppingResults", protocol.shopping_body(req, protocol.SORTS[sort or "best"]), locale,
+                       done=parsers.shopping_complete)
+    return parsers.shopping_chunk(chunks)
 
 
 def _results(payload, locale, tokenize, filters=None, sort=None):

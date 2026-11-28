@@ -24,10 +24,11 @@ at call time (autocomplete).
 import fastjson
 import re
 import unicodedata
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from urllib.parse import urlparse
 
 from google_flights import protocol
+from google_flights.shared import MAX_DAYS_AHEAD
 
 MAX_PLACES = 7
 MAX_LEGS = 6
@@ -93,6 +94,10 @@ def _leg_date(value):
         raise ValueError(f"leg date {value!r} must be YYYY-MM-DD")
     if parsed < date.today():
         raise ValueError(f"leg date {value} is in the past")
+    last = date.today() + timedelta(days=MAX_DAYS_AHEAD)
+    if parsed > last:
+        raise ValueError(f"leg date {value} is after {last.isoformat()}: Google Flights searches at most "
+                         f"{MAX_DAYS_AHEAD} days ahead")
     return parsed.isoformat()
 
 

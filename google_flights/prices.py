@@ -3,14 +3,32 @@ the round-trip date grid (departure x return, GetCalendarGrid).
 
 Limits measured 2026-09-26: the calendar accepts up to 92 days per call
 (six months is rejected); round trips need a fixed trip length. The date
-grid accepts a 7 x 7 window (a 15 x 15 window is rejected)."""
+grid accepts a 7 x 7 window (a 15 x 15 window is rejected). Measured
+2026-11-28: a calendar or grid window that ends past today +
+MAX_DAYS_AHEAD is refused with [3] (reason 3, too far ahead), so both end
+their windows on that day at the latest."""
 from datetime import date, timedelta
 
 from google_flights import fetch, parsers, places, protocol
 from google_flights.flights import _leg_options, _locale, _request
 from google_flights.fetch import GoogleFlightsNotFound
+from google_flights.shared import MAX_DAYS_AHEAD
 
 GRID_HALF_WINDOW = 3
+
+
+def _last_day():
+    return date.today() + timedelta(days=MAX_DAYS_AHEAD)
+
+
+def _window(start, floor, last):
+    """A 2 * GRID_HALF_WINDOW + 1 day window from `start` (never before
+    `floor`), moved back so it ends on `last` at the latest."""
+    width = timedelta(days=2 * GRID_HALF_WINDOW)
+    start = max(start, floor)
+    if start + width > last:
+        start = max(floor, last - width)
+    return start, min(start + width, last)
 
 
 def _cheapest(points):
@@ -25,7 +43,7 @@ def calendar(origin, destination, start_date, end_date=None, trip_length_days=No
     fares are round trips returning that many days later."""
     locale = _locale(currency, language, country)
     start = date.fromisoformat(start_date)
-    end = date.fromisoformat(end_date) if end_date else start + timedelta(days=60)
+    end = date.fromisoformat(end_date) if end_date else min(start + timedelta(days=60), _last_day())
     origins, destinations = places.resolve(origin, locale), places.resolve(destination, locale)
     legs = [protocol.leg(origins, destinations, start.isoformat(), **_leg_options(kw))]
     trip = protocol.TRIP_ONE_WAY
@@ -56,11 +74,10 @@ def date_grid(origin, destination, departure_date, return_date, currency=None, l
     departure x return combination within 3 days of the given dates."""
     locale = _locale(currency, language, country)
     dep, ret = date.fromisoformat(departure_date), date.fromisoformat(return_date)
-    today = date.today()
-    dep_from = max(dep - timedelta(days=GRID_HALF_WINDOW), today)
-    dep_to = dep_from + timedelta(days=2 * GRID_HALF_WINDOW)
-    ret_from = max(ret - timedelta(days=GRID_HALF_WINDOW), dep_from)
-    ret_to = ret_from + timedelta(days=2 * GRID_HALF_WINDOW)
+    today, last = date.today(), _last_day()
+    half = timedelta(days=GRID_HALF_WINDOW)
+    dep_from, dep_to = _window(dep - half, today, last)
+    ret_from, ret_to = _window(ret - half, dep_from, last)
     origins, destinations = places.resolve(origin, locale), places.resolve(destination, locale)
     legs = [protocol.leg(origins, destinations, departure_date, **_leg_options(kw)),
             protocol.leg(destinations, origins, return_date, **_leg_options(kw))]

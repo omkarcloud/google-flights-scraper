@@ -7,6 +7,14 @@ from datetime import datetime, timezone
 from scraper_utils.values import as_list, to_int as as_int
 
 CABIN_CODES = {"economy": 1, "premium_economy": 2, "business": 3, "first": 4}
+
+# The furthest date Google Flights searches, in days from today. Measured
+# 2026-11-28 with good tokens (a local Chrome, its own IP and UA): a one-way
+# BFS-MAN on today + 329 days answered flights, today + 330 answered [3] with
+# reason 3 (too far ahead); a calendar or date-grid window that ends past it
+# is refused the same way, so the schemas and prices.py keep every date
+# (and every window end) on or before this day.
+MAX_DAYS_AHEAD = 329
 CABIN_NAMES = {1: "economy", 2: "premium_economy", 3: "business", 4: "first",
                5: "economy", 6: "economy"}
 

@@ -143,6 +143,12 @@ class Recipe:
 
     # ---- driver construction (shared) ------------------------------------------
 
+    def chrome_args_for(self, proxy: Optional[str]) -> tuple:
+        """Extra Chrome switches for a launch through `proxy` (None = the
+        box's own IP): `chrome_args` unless the recipe needs some only
+        through a proxy (google-flights: --disable-http2)."""
+        return self.chrome_args
+
     def launch(self, proxy: Optional[str], headless: Optional[bool] = None):
         # Both drivers record a browser's processes by pid-diff around the
         # spawn, so spawns are serialized by launch_lock.LAUNCH_LOCK.
@@ -162,7 +168,7 @@ class Recipe:
             proxy_url=proxy, headless=headless,
             block_resources=self.block_resources, block_hosts=self.block_hosts,
             direct_hosts=self.direct_hosts, browserforge=self.browserforge,
-            timezone=self.timezone, extra_args=self.chrome_args,
+            timezone=self.timezone, extra_args=self.chrome_args_for(proxy),
             geoip_timezone=bool(proxy) and self.geoip_timezone,
             locale=self.locale, channel=self.channel)
 
